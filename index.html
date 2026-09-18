@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>한국 읽기 · Reading Korea</title>
+<style>
+  :root{--bg:#fbfaf8;--fg:#1c1a17;--mut:#6b655c;--line:#e2ddd4;--accent:#8c2f1f;--card:#fff}
+  @media(prefers-color-scheme:dark){:root{--bg:#16151a;--fg:#e8e5df;--mut:#9c968c;--line:#2f2c34;--accent:#e2795f;--card:#1e1d23}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 system-ui,-apple-system,'Malgun Gothic',sans-serif;word-break:keep-all}
+  #gatewrap{max-width:420px;margin:14vh auto;padding:0 1.5rem}
+  #gatewrap h1{font-size:1.6rem;margin:0 0 .3em}
+  #gatewrap p{color:var(--mut);margin:0 0 1.4em}
+  #gateform{display:flex;gap:.5rem}
+  input[type=password]{flex:1;font-size:1rem;padding:.6rem .7rem;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg)}
+  button{font-size:1rem;padding:.6rem 1.1rem;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;cursor:pointer}
+  button:disabled{opacity:.6;cursor:default}
+  #err{color:#b00020;min-height:1.2em;margin-top:.6em;font-size:.9rem}
+  #app{display:none}
+
+  #topbar{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);
+    padding:.6rem 1rem;display:flex;align-items:center;gap:.8rem;z-index:9;font-size:.85rem}
+  #topbar button{padding:.35rem .7rem;font-size:.85rem;background:transparent;color:var(--fg);border-color:var(--line)}
+  #toctoggle{margin-right:auto}
+  #pageinfo{color:var(--mut);white-space:nowrap}
+
+  #layout{display:flex;max-width:900px;margin:0 auto}
+  #toc{width:260px;flex:none;padding:1.2rem .8rem;border-right:1px solid var(--line);
+    position:sticky;top:44px;align-self:flex-start;max-height:calc(100vh - 44px);overflow-y:auto}
+  #toc.hidden{display:none}
+  #toc button{display:block;width:100%;text-align:left;background:transparent;color:var(--fg);
+    border:0;padding:.45rem .5rem;font-size:.85rem;border-radius:5px;cursor:pointer}
+  #toc button:hover{background:var(--card);color:var(--accent)}
+  #toc button.active{color:var(--accent);font-weight:600}
+
+  main{flex:1;min-width:0;padding:2rem 1.6rem 8rem;max-width:680px}
+  .page{white-space:pre-wrap;margin:0 0 2.2rem;font-size:.98rem;padding-bottom:1.4rem;border-bottom:1px dashed var(--line)}
+  .page-num{color:var(--mut);font-size:.72rem;margin:0 0 .6rem}
+  .chapter-title{font-size:1.35rem;font-weight:700;margin:2.4rem 0 1rem;color:var(--accent);border-top:1px solid var(--line);padding-top:1.6rem}
+  main > .page:first-child, main > .chapter-title:first-child{border-top:0;padding-top:0;margin-top:0}
+
+  @media(max-width:760px){#toc{position:fixed;left:0;top:44px;bottom:0;background:var(--bg);z-index:8;width:78vw}}
+</style>
+</head>
+<body>
+  <div id="gatewrap">
+    <form id="gateform">
+      <h1>한국 읽기 <span style="color:var(--mut);font-size:.6em">Reading Korea</span></h1>
+      <p>암호는 이 기기를 벗어나지 않습니다. Passphrase never leaves this device.</p>
+      <input id="pass" type="password" placeholder="Passphrase" autocomplete="current-password" required>
+      <button id="go" type="submit">Unlock</button>
+    </form>
+    <div id="err" role="alert"></div>
+  </div>
+
+  <div id="app">
+    <div id="topbar">
+      <button id="toctoggle" type="button">목차 ☰</button>
+      <span id="pageinfo"></span>
+    </div>
+    <div id="layout">
+      <nav id="toc"></nav>
+      <main id="content"></main>
+    </div>
+  </div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+async function unlock(env, pass) {
+  const km = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: b64(env.salt), iterations: env.iter, hash: "SHA-256" },
+    km, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: b64(env.nonce) }, key, b64(env.ct));
+  let text;
+  if (env.gz) {
+    const ds = new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream("gzip")));
+    text = await ds.text();
+  } else {
+    text = new TextDecoder().decode(plain);
+  }
+  return JSON.parse(text);
+}
+
+function render(data) {
+  document.title = data.title + " · " + data.subtitle;
+
+  const chapterAtPage = new Map(data.chapters.map(c => [c.page, c.title]));
+  const content = $("content");
+  const frag = document.createDocumentFragment();
+
+  data.pages.forEach((pageText, i) => {
+    if (chapterAtPage.has(i)) {
+      const h = document.createElement("div");
+      h.className = "chapter-title";
+      h.id = "ch-" + i;
+      h.textContent = chapterAtPage.get(i);
+      frag.appendChild(h);
+    }
+    const wrap = document.createElement("div");
+    wrap.id = "p-" + i;
+    const num = document.createElement("div");
+    num.className = "page-num";
+    num.textContent = "p. " + (i + 1) + " / " + data.pages.length;
+    const body = document.createElement("div");
+    body.className = "page";
+    body.textContent = pageText;
+    wrap.appendChild(num);
+    wrap.appendChild(body);
+    frag.appendChild(wrap);
+  });
+  content.appendChild(frag);
+
+  const toc = $("toc");
+  const tocFrag = document.createDocumentFragment();
+  data.chapters.forEach(c => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = c.title;
+    b.dataset.target = "ch-" + c.page;
+    b.addEventListener("click", () => {
+      document.getElementById(b.dataset.target).scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    tocFrag.appendChild(b);
+  });
+  toc.appendChild(tocFrag);
+
+  $("pageinfo").textContent = data.pages.length + " pages";
+
+  $("toctoggle").addEventListener("click", () => toc.classList.toggle("hidden"));
+  if (window.innerWidth <= 760) toc.classList.add("hidden");
+}
+
+$("gateform").addEventListener("submit", async e => {
+  e.preventDefault();
+  const err = $("err"), btn = $("go");
+  err.textContent = "";
+  if (!window.crypto || !crypto.subtle) {
+    err.textContent = "This browser can't decrypt the archive (needs HTTPS and a modern browser).";
+    return;
+  }
+  btn.disabled = true; btn.textContent = "Decrypting…";
+  try {
+    const env = await (await fetch("payload.json", { cache: "no-cache" })).json();
+    const data = await unlock(env, $("pass").value);
+    $("gatewrap").style.display = "none";
+    $("app").style.display = "block";
+    render(data);
+  } catch (ex) {
+    err.textContent = (ex && ex.name === "OperationError")
+      ? "Wrong passphrase."
+      : "Could not load the archive: " + (ex && ex.message ? ex.message : ex);
+  } finally {
+    btn.disabled = false; btn.textContent = "Unlock";
+  }
+});
+</script>
+</body>
+</html>
