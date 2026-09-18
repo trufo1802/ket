@@ -122,7 +122,6 @@ function renderBlock(block, images) {
     block.items.forEach(item => {
       const fig = document.createElement("figure");
       const img = document.createElement("img");
-      img.loading = "lazy";
       img.alt = item.caption;
       img.src = "data:image/png;base64," + images[item.file];
       const cap = document.createElement("figcaption");
