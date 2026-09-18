@@ -35,10 +35,17 @@
   #toc button.active{color:var(--accent);font-weight:600}
 
   main{flex:1;min-width:0;padding:2rem 2.4rem 8rem;max-width:1100px}
-  .page{white-space:pre-wrap;margin:0 0 2.2rem;font-size:.98rem;padding-bottom:1.4rem;border-bottom:1px dashed var(--line)}
+  .page{margin:0 0 2.2rem;font-size:.98rem;padding-bottom:1.4rem;border-bottom:1px dashed var(--line)}
   .page-num{color:var(--mut);font-size:.72rem;margin:0 0 .6rem}
   .chapter-title{font-size:1.35rem;font-weight:700;margin:2.4rem 0 1rem;color:var(--accent);border-top:1px solid var(--line);padding-top:1.6rem}
   main > .page:first-child, main > .chapter-title:first-child{border-top:0;padding-top:0;margin-top:0}
+  .block-p{white-space:pre-wrap;margin:0 0 1em}
+  .block-table{width:100%;margin:0 0 1.2em;border-collapse:collapse;font-size:.88rem}
+  .block-table td{border:1px solid var(--line);padding:.35em .6em;vertical-align:top}
+  .figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;margin:0 0 1.4em}
+  .figures figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:7px;padding:.7rem}
+  .figures img{width:100%;height:auto;display:block;border-radius:4px}
+  .figures figcaption{font-size:.78rem;color:var(--mut);margin-top:.5rem}
 
   @media(max-width:760px){#toc{position:fixed;left:0;top:44px;bottom:0;background:var(--bg);z-index:8;width:78vw}}
 </style>
@@ -88,6 +95,47 @@ async function unlock(env, pass) {
   return JSON.parse(text);
 }
 
+function renderBlock(block, images) {
+  if (block.t === "p") {
+    const p = document.createElement("div");
+    p.className = "block-p";
+    p.textContent = block.text;
+    return p;
+  }
+  if (block.t === "table") {
+    const table = document.createElement("table");
+    table.className = "block-table";
+    block.rows.forEach(row => {
+      const tr = document.createElement("tr");
+      row.forEach(cell => {
+        const td = document.createElement("td");
+        td.textContent = cell;
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    return table;
+  }
+  if (block.t === "figures") {
+    const wrap = document.createElement("div");
+    wrap.className = "figures";
+    block.items.forEach(item => {
+      const fig = document.createElement("figure");
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.alt = item.caption;
+      img.src = "data:image/png;base64," + images[item.file];
+      const cap = document.createElement("figcaption");
+      cap.textContent = item.caption;
+      fig.appendChild(img);
+      fig.appendChild(cap);
+      wrap.appendChild(fig);
+    });
+    return wrap;
+  }
+  return null;
+}
+
 function render(data) {
   document.title = data.title + " · " + data.subtitle;
 
@@ -95,7 +143,7 @@ function render(data) {
   const content = $("content");
   const frag = document.createDocumentFragment();
 
-  data.pages.forEach((pageText, i) => {
+  data.pages.forEach((blocks, i) => {
     if (chapterAtPage.has(i)) {
       const h = document.createElement("div");
       h.className = "chapter-title";
@@ -110,7 +158,10 @@ function render(data) {
     num.textContent = "p. " + (i + 1) + " / " + data.pages.length;
     const body = document.createElement("div");
     body.className = "page";
-    body.textContent = pageText;
+    blocks.forEach(b => {
+      const el = renderBlock(b, data.images);
+      if (el) body.appendChild(el);
+    });
     wrap.appendChild(num);
     wrap.appendChild(body);
     frag.appendChild(wrap);
